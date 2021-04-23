@@ -6,6 +6,7 @@
 #include <sys/sysmacros.h>
 #include <sys/wait.h>
 #include <sys/reboot.h>
+#include <linux/reboot.h>
 
 int main() {
     if (mknod("/dev/ttyS0", S_IFCHR | S_IRUSR | S_IWUSR, makedev(4, 64)) == -1) {
@@ -32,9 +33,10 @@ int main() {
 		    }
 	    }
 	    waitpid(fpid, NULL, 0);
+	    printf("******Finish running %d! Sleep 2 seconds.******\n", i);
+	    sleep(2);
     }
-    
+    printf("Finish!\n");
     sync();
-    reboot(RB_POWER_OFF);
-    return 0;
+    reboot(RB_HALT_SYSTEM);
 }
