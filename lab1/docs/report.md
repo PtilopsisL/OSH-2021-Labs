@@ -36,6 +36,7 @@ Linux是一个操作系统最底层的核心及其提供的核心工具。
   - `bootcode.bin`会启用SDRAM，读取第三阶段的bootloader（即`loader.bin`）到RAM中并运行。
   - `loader.bin`会读取GPU固件（即`start.elf`）。
   - `start.elf`继续读取`config.txt`（配置文件），`cmdline.txt`（内核启动时传入的内核的命令）和`kernel.img`
+- **第5题** `qemu-user`能让一段其他ISA程序运行在当前CPU的ISA上（如让arm程序运行在x86处理器上），并在程序运行的过程中实时转发系统调用，处理信号（如`Ctrl+C`这种Interrupt信号）等。`arm64`的`busybox`能在x86机器上运行的原理正是基于此。`qemu-user`与`qemu-system`的区别在于，`qemu-user`只模拟用户态程序的运行，`qemu-system`是直接模拟启动整个系统，包括模拟处理器、硬盘等硬件设备。
 - **第7题** 简单来说，启动时会首先读取GRUB位于MBR的`boot.img`（stage 1），随后如果有`core.img`（stage 1.5）则装载`core.img`并由其装载stage 2，如果没有则直接装载stage 2。当stage 2启动后，它将呈现一个界面来让用户选择启动的操作系统。总之，这一步最后会选择一个内核进行启动，将控制交给内核，结束GRUB部分的工作。
 - **第8题** UEFI启动时，先进行硬件自检，自检后初始化硬件，随后UEFI不从MBR读取代码，而是从NVRAM中读取启动项（boot entries）（启动项例如`\EFT\BOOT\BOOTX64.EFI`），此后会启动该EFI应用程序。  
 EFI分区内容如下：  
