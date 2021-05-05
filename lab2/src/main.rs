@@ -108,6 +108,23 @@ fn main() -> ! {
                     "exit" => {
                         exit(0);
                     }
+                    "echo" => {
+                        let mut env_name;
+                        match args.next() {
+                            Option::Some(name) => env_name = String::from(name),
+                            Option::None => env_name = String::from(""),
+                        }
+
+                        env_name = env_name.replace("$", "");
+
+                        let value;
+                        match env::var(env_name) {
+                            Ok(val) => value = val,
+                            Err(_e) => value = String::from(""),
+                        }
+
+                        println!("{}", value);
+                    }
                     _ => {
                         let process = match Command::new(prog)
                             .args(args)
