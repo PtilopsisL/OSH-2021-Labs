@@ -3,22 +3,61 @@ use std::io::prelude::*;
 use std::io::{self, Write};
 use std::io::{stdin, BufRead};
 use std::process::{exit, Command, Stdio};
-extern crate dirs;
 extern crate regex;
-extern crate whoami;
+extern crate signal_hook;
 use regex::Regex;
+
+fn get_host_name() -> String {
+    let replace_point = Regex::new(r"\..*").unwrap();
+
+    let process = match Command::new("hostname")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Err(why) => panic!("couldn't spawn process: {}", why),
+        Ok(process) => process,
+    };
+
+    let mut devicename = String::new();
+
+    match process.stdout.unwrap().read_to_string(&mut devicename) {
+        Err(why) => panic!("couldn't read stdout: {}", why),
+        Ok(_) => {},
+    }
+
+    devicename = devicename.replace("\n", "");
+
+    devicename = replace_point.replace_all(&devicename, "").to_string();
+
+    return devicename;
+}
 
 fn main() -> ! {
     let re_find_curr_dir = Regex::new(r".+/").unwrap();
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
-    let user_name = whoami::username();
-    let device_name = whoami::devicename();
-    let home = dirs::home_dir().expect("Get home dir failed!");
+
+    let user_name;
+    match env::var("USER") {
+        Ok(val) => user_name = val,
+        Err(_e) => user_name = String::from(""),
+    }
+
+    let host_name = get_host_name();
+
+    let home;
+    match env::var("HOME") {
+        Ok(val) => home = val,
+        Err(e) => {
+            println!("Warning! get home dir failed!: {}", e);
+            home = String::from("")
+        }
+    }
     loop {
         let current_dir = env::current_dir().expect("Get current dir failed!");
         let curr_dir_name =
             re_find_curr_dir.replace(current_dir.to_str().expect("to_str() failed!"), "");
-        print!("[{}@{}] {} $ ", user_name, device_name, curr_dir_name);
+        print!("[{}@{}] {} $ ", user_name, host_name, curr_dir_name);
         io::stdout().flush().unwrap();
         let mut cmd = String::new();
         for line_res in stdin().lock().lines() {
@@ -28,7 +67,7 @@ fn main() -> ! {
         }
         let mut replace_to_home = String::new();
         replace_to_home.push_str("$y");
-        replace_to_home.push_str(home.to_str().expect("to_str() failed!"));
+        replace_to_home.push_str(&home);
         let cmd = re_replace_to_home.replace_all(&cmd, replace_to_home);
 
         let pipes = cmd.split("|");
@@ -37,8 +76,6 @@ fn main() -> ! {
         for progs in pipes {
             let mut args = progs.split_whitespace();
             let prog = args.next();
-
-            
 
             match prog {
                 None => continue,
@@ -51,9 +88,7 @@ fn main() -> ! {
                             }
                             Some(input_dir) => {
                                 let re = Regex::new("^~").unwrap();
-                                let set_dir = re
-                                    .replace(input_dir, home.to_str().expect("to_str() failed!"))
-                                    .into_owned();
+                                let set_dir = re.replace(input_dir, &home).into_owned();
                                 env::set_current_dir(set_dir).expect("Changing current dir failed");
                             }
                         }
