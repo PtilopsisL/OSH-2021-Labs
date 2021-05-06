@@ -1,11 +1,12 @@
+use nix::sys::signal;
+use regex::Regex;
 use std::env;
 use std::io::prelude::*;
 use std::io::{self, Write};
 use std::io::{stdin, BufRead};
 use std::process::{exit, Command, Stdio};
-extern crate regex;
-extern crate signal_hook;
-use regex::Regex;
+
+static mut PRE: String = String::new();
 
 fn get_host_name() -> String {
     let replace_point = Regex::new(r"\..*").unwrap();
@@ -23,7 +24,7 @@ fn get_host_name() -> String {
 
     match process.stdout.unwrap().read_to_string(&mut devicename) {
         Err(why) => panic!("couldn't read stdout: {}", why),
-        Ok(_) => {},
+        Ok(_) => {}
     }
 
     devicename = devicename.replace("\n", "");
@@ -33,7 +34,24 @@ fn get_host_name() -> String {
     return devicename;
 }
 
+extern "C" fn handle_sigint(_num: i32) {
+    unsafe{
+        print!("\n{}", PRE);
+        io::stdout().flush().unwrap();
+    }
+}
+
 fn main() -> ! {
+    let sigint_action = signal::SigAction::new(
+        signal::SigHandler::Handler(handle_sigint),
+        signal::SaFlags::empty(),
+        signal::SigSet::empty(),
+    );
+
+    unsafe {
+        let _sigint = signal::sigaction(signal::SIGINT, &sigint_action);
+    }
+
     let re_find_curr_dir = Regex::new(r".+/").unwrap();
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
 
@@ -56,15 +74,26 @@ fn main() -> ! {
     loop {
         let current_dir = env::current_dir().expect("Get current dir failed!");
         let curr_dir_name =
-            re_find_curr_dir.replace(current_dir.to_str().expect("to_str() failed!"), "");
+            re_find_curr_dir.replace(current_dir.to_str().expect("to_str() failed!"), "").into_owned();
+        unsafe{
+            PRE = format!("[{}@{}] {} $ ", user_name, host_name, curr_dir_name);
+        }
         print!("[{}@{}] {} $ ", user_name, host_name, curr_dir_name);
         io::stdout().flush().unwrap();
+
+        let mut readin_flag = 0;
         let mut cmd = String::new();
         for line_res in stdin().lock().lines() {
             let line = line_res.expect("Read a line from stdin failed");
+            readin_flag = 1;
             cmd = line;
             break;
         }
+
+        if readin_flag == 0 {
+            exit(0);
+        }
+
         let mut replace_to_home = String::new();
         replace_to_home.push_str("$y");
         replace_to_home.push_str(&home);
