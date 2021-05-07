@@ -12,6 +12,8 @@ static NOCHANGE: i32 = 0;
 static CREATE: i32 = 1;
 static APPEND: i32 = 2;
 static INPUT: i32 = 3;
+static HERE: i32 = 4; // HERE Document input mode
+static TEXTIN: i32 = 5;
 
 fn get_host_name() -> String {
     let replace_point = Regex::new(r"\..*").unwrap();
@@ -61,7 +63,9 @@ fn main() -> ! {
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
     let re_create = Regex::new(r"[^>]{1}>[\s]*([0-9a-zA-Z\._]+)").unwrap();
     let re_append = Regex::new(r"[^>]{1}>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_input = Regex::new(r"[^>]{1}<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_input = Regex::new(r"[^<]{1}<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_here = Regex::new(r"[^<]{1}<<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_textin = Regex::new(r"[^<]{1}<<<[\s]*([\S]+)").unwrap();
 
     let user_name;
     match env::var("USER") {
@@ -111,40 +115,74 @@ fn main() -> ! {
             .into_owned();
 
         let mut in_out_file = String::new();
-        let mut redirect_state = NOCHANGE;
+        let mut redirect_out_state = NOCHANGE;
+        let mut redirect_in_state = NOCHANGE;
 
         for caps in re_create.captures_iter(&cmd) {
             in_out_file = String::from(&caps[1]);
-            redirect_state = CREATE;
+            redirect_out_state = CREATE;
         }
 
-        if redirect_state == CREATE {
+        if redirect_out_state == CREATE {
             cmd = re_create.replace_all(&cmd, "").into_owned();
         }
 
         for caps in re_append.captures_iter(&cmd) {
             in_out_file = String::from(&caps[1]);
-            redirect_state = APPEND;
+            redirect_out_state = APPEND;
         }
 
-        if redirect_state == APPEND {
+        if redirect_out_state == APPEND {
             cmd = re_append.replace_all(&cmd, "").into_owned();
         }
 
         for caps in re_input.captures_iter(&cmd) {
             in_out_file = String::from(&caps[1]);
-            redirect_state = INPUT;
+            redirect_in_state = INPUT;
         }
 
-        if redirect_state == INPUT {
+        if redirect_in_state == INPUT {
             cmd = re_input.replace_all(&cmd, "").into_owned();
+        }
+
+        for caps in re_here.captures_iter(&cmd) {
+            in_out_file = String::from(&caps[1]);
+            redirect_in_state = HERE;
+        }
+
+        if redirect_in_state == HERE {
+            cmd = re_here.replace_all(&cmd, "").into_owned();
+        }
+
+        for caps in re_textin.captures_iter(&cmd) {
+            in_out_file = String::from(&caps[1]);
+            redirect_in_state = TEXTIN;
+        }
+
+        if redirect_in_state == TEXTIN {
+            cmd = re_textin.replace_all(&cmd, "").into_owned();
         }
 
         let pipes = cmd.split("|");
         let mut prog_out = String::new();
 
-        if redirect_state == INPUT {
+        if redirect_in_state == INPUT {
             prog_out = fs::read_to_string(&in_out_file).unwrap();
+        } else if redirect_in_state == HERE {
+            print!("> ");
+            io::stdout().flush().unwrap();
+            for line_res in stdin().lock().lines() {
+                let get_line = line_res.expect("Read a line from stdin failed");
+                if get_line == in_out_file {
+                    break;
+                } else {
+                    prog_out = prog_out + &get_line + "\n";
+                }
+                print!("> ");
+                io::stdout().flush().unwrap();
+            }
+        } else if redirect_in_state == TEXTIN {
+            prog_out = in_out_file.clone() + "\n";
         }
 
         for progs in pipes {
@@ -169,7 +207,8 @@ fn main() -> ! {
                     }
                     "pwd" => {
                         let err = "Getting current dir failed";
-                        prog_out = format!("{}\n", env::current_dir().expect(err).to_str().expect(err));
+                        prog_out =
+                            format!("{}\n", env::current_dir().expect(err).to_str().expect(err));
                     }
                     "export" => {
                         for arg in args {
@@ -227,13 +266,13 @@ fn main() -> ! {
         }
 
         if !prog_out.is_empty() {
-            if redirect_state == APPEND {
+            if redirect_out_state == APPEND {
                 let mut file = fs::OpenOptions::new()
                     .append(true)
                     .open(&in_out_file)
                     .unwrap();
                 file.write(prog_out.as_bytes()).unwrap();
-            } else if redirect_state == CREATE {
+            } else if redirect_out_state == CREATE {
                 fs::write(&in_out_file, prog_out).unwrap();
             } else {
                 print!("{}", prog_out);
