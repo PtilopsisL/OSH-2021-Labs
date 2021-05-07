@@ -1,12 +1,17 @@
 use nix::sys::signal;
 use regex::Regex;
 use std::env;
+use std::fs;
 use std::io::prelude::*;
 use std::io::{self, Write};
 use std::io::{stdin, BufRead};
 use std::process::{exit, Command, Stdio};
 
 static mut PRE: String = String::new();
+static NOCHANGE: i32 = 0;
+static CREATE: i32 = 1;
+static APPEND: i32 = 2;
+static INPUT: i32 = 3;
 
 fn get_host_name() -> String {
     let replace_point = Regex::new(r"\..*").unwrap();
@@ -35,7 +40,7 @@ fn get_host_name() -> String {
 }
 
 extern "C" fn handle_sigint(_num: i32) {
-    unsafe{
+    unsafe {
         print!("\n{}", PRE);
         io::stdout().flush().unwrap();
     }
@@ -54,6 +59,9 @@ fn main() -> ! {
 
     let re_find_curr_dir = Regex::new(r".+/").unwrap();
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
+    let re_create = Regex::new(r"[^>]{1}>[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_append = Regex::new(r"[^>]{1}>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_input = Regex::new(r"[^>]{1}<[\s]*([0-9a-zA-Z\._]+)").unwrap();
 
     let user_name;
     match env::var("USER") {
@@ -67,15 +75,16 @@ fn main() -> ! {
     match env::var("HOME") {
         Ok(val) => home = val,
         Err(e) => {
-            println!("Warning! get home dir failed!: {}", e);
+            println!("Warning: get home dir failed!: {}", e);
             home = String::from("")
         }
     }
     loop {
         let current_dir = env::current_dir().expect("Get current dir failed!");
-        let curr_dir_name =
-            re_find_curr_dir.replace(current_dir.to_str().expect("to_str() failed!"), "").into_owned();
-        unsafe{
+        let curr_dir_name = re_find_curr_dir
+            .replace(current_dir.to_str().expect("to_str() failed!"), "")
+            .into_owned();
+        unsafe {
             PRE = format!("[{}@{}] {} $ ", user_name, host_name, curr_dir_name);
         }
         print!("[{}@{}] {} $ ", user_name, host_name, curr_dir_name);
@@ -97,10 +106,46 @@ fn main() -> ! {
         let mut replace_to_home = String::new();
         replace_to_home.push_str("$y");
         replace_to_home.push_str(&home);
-        let cmd = re_replace_to_home.replace_all(&cmd, replace_to_home);
+        let mut cmd = re_replace_to_home
+            .replace_all(&cmd, replace_to_home)
+            .into_owned();
+
+        let mut in_out_file = String::new();
+        let mut redirect_state = NOCHANGE;
+
+        for caps in re_create.captures_iter(&cmd) {
+            in_out_file = String::from(&caps[1]);
+            redirect_state = CREATE;
+        }
+
+        if redirect_state == CREATE {
+            cmd = re_create.replace_all(&cmd, "").into_owned();
+        }
+
+        for caps in re_append.captures_iter(&cmd) {
+            in_out_file = String::from(&caps[1]);
+            redirect_state = APPEND;
+        }
+
+        if redirect_state == APPEND {
+            cmd = re_append.replace_all(&cmd, "").into_owned();
+        }
+
+        for caps in re_input.captures_iter(&cmd) {
+            in_out_file = String::from(&caps[1]);
+            redirect_state = INPUT;
+        }
+
+        if redirect_state == INPUT {
+            cmd = re_input.replace_all(&cmd, "").into_owned();
+        }
 
         let pipes = cmd.split("|");
         let mut prog_out = String::new();
+
+        if redirect_state == INPUT {
+            prog_out = fs::read_to_string(&in_out_file).unwrap();
+        }
 
         for progs in pipes {
             let mut args = progs.split_whitespace();
@@ -124,7 +169,7 @@ fn main() -> ! {
                     }
                     "pwd" => {
                         let err = "Getting current dir failed";
-                        println!("{}", env::current_dir().expect(err).to_str().expect(err));
+                        prog_out = format!("{}\n", env::current_dir().expect(err).to_str().expect(err));
                     }
                     "export" => {
                         for arg in args {
@@ -152,7 +197,7 @@ fn main() -> ! {
                             Err(_e) => value = String::from(""),
                         }
 
-                        println!("{}", value);
+                        prog_out = format!("{}\n", value);
                     }
                     _ => {
                         let process = match Command::new(prog)
@@ -182,8 +227,18 @@ fn main() -> ! {
         }
 
         if !prog_out.is_empty() {
-            print!("{}", prog_out);
-            io::stdout().flush().unwrap();
+            if redirect_state == APPEND {
+                let mut file = fs::OpenOptions::new()
+                    .append(true)
+                    .open(&in_out_file)
+                    .unwrap();
+                file.write(prog_out.as_bytes()).unwrap();
+            } else if redirect_state == CREATE {
+                fs::write(&in_out_file, prog_out).unwrap();
+            } else {
+                print!("{}", prog_out);
+                io::stdout().flush().unwrap();
+            }
         }
     }
 }
