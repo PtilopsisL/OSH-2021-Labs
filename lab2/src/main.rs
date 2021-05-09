@@ -5,7 +5,9 @@ use std::fs;
 use std::io::prelude::*;
 use std::io::{self, Write};
 use std::io::{stdin, BufRead};
+use std::os::unix::io::IntoRawFd;
 use std::process::{exit, Command, Stdio};
+use std::vec::Vec;
 
 static mut PRE: String = String::new();
 static NOCHANGE: i32 = 0;
@@ -41,6 +43,13 @@ fn get_host_name() -> String {
     return devicename;
 }
 
+fn reset_fd(reset: &Vec<(i32, i32)>) {
+    for elem in reset {
+        let (old_fd, new_fd) = elem;
+        nix::unistd::dup2(*old_fd, *new_fd).unwrap();
+    }
+}
+
 extern "C" fn handle_sigint(_num: i32) {
     unsafe {
         print!("\n{}", PRE);
@@ -61,11 +70,13 @@ fn main() -> ! {
 
     let re_find_curr_dir = Regex::new(r".+/").unwrap();
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
-    let re_create = Regex::new(r"[^>]{1}>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_append = Regex::new(r"[^>]{1}>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_input = Regex::new(r"[^<]{1}<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_create = Regex::new(r"[^>]{1}([0-9]*)>[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_append = Regex::new(r"[^>]{1}([0-9]*)>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_input = Regex::new(r"[^<]{1}([0-9]*)<[\s]*([0-9a-zA-Z\._]+)").unwrap();
     let re_here = Regex::new(r"[^<]{1}<<[\s]*([0-9a-zA-Z\._]+)").unwrap();
     let re_textin = Regex::new(r"[^<]{1}<<<[\s]*([\S]+)").unwrap();
+    let re_fd_in = Regex::new(r"[\s]+([0-9]+)<&[\s]*([0-9]+)").unwrap();
+    let re_fd_out = Regex::new(r"[\s]+([0-9]+)>&[\s]*([0-9]+)").unwrap();
 
     let user_name;
     match env::var("USER") {
@@ -84,6 +95,7 @@ fn main() -> ! {
         }
     }
     loop {
+        let mut fd_reset_list: Vec<(i32, i32)> = Vec::new();
         let current_dir = env::current_dir().expect("Get current dir failed!");
         let curr_dir_name = re_find_curr_dir
             .replace(current_dir.to_str().expect("to_str() failed!"), "")
@@ -118,8 +130,30 @@ fn main() -> ! {
         let mut redirect_out_state = NOCHANGE;
         let mut redirect_in_state = NOCHANGE;
 
+        // regex match
         for caps in re_create.captures_iter(&cmd) {
-            in_out_file = String::from(&caps[1]);
+            let raw_fd_result = String::from(&caps[1]).parse::<i32>();
+            let raw_fd: i32;
+            match raw_fd_result {
+                Ok(num) => raw_fd = num,
+                Err(_) => raw_fd = 1,
+            };
+
+            in_out_file = String::from(&caps[2]);
+
+            let fd_backup = nix::unistd::dup(raw_fd);
+            match fd_backup {
+                Ok(new_fd) => fd_reset_list.push((new_fd, raw_fd)),
+                Err(_) => {}
+            }
+
+            let file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&in_out_file)
+                .unwrap();
+            let file_fd = file.into_raw_fd();
+            nix::unistd::dup2(file_fd, raw_fd).unwrap();
             redirect_out_state = CREATE;
         }
 
@@ -128,7 +162,28 @@ fn main() -> ! {
         }
 
         for caps in re_append.captures_iter(&cmd) {
-            in_out_file = String::from(&caps[1]);
+            let raw_fd_result = String::from(&caps[1]).parse::<i32>();
+            let raw_fd: i32;
+            match raw_fd_result {
+                Ok(num) => raw_fd = num,
+                Err(_) => raw_fd = 1,
+            };
+
+            in_out_file = String::from(&caps[2]);
+
+            let fd_backup = nix::unistd::dup(raw_fd);
+            match fd_backup {
+                Ok(new_fd) => fd_reset_list.push((new_fd, raw_fd)),
+                Err(_) => {}
+            }
+
+            let file = fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&in_out_file)
+                .unwrap();
+            let file_fd = file.into_raw_fd();
+            nix::unistd::dup2(file_fd, raw_fd).unwrap();
             redirect_out_state = APPEND;
         }
 
@@ -137,7 +192,27 @@ fn main() -> ! {
         }
 
         for caps in re_input.captures_iter(&cmd) {
-            in_out_file = String::from(&caps[1]);
+            let raw_fd_result = String::from(&caps[1]).parse::<i32>();
+            let raw_fd: i32;
+            match raw_fd_result {
+                Ok(num) => raw_fd = num,
+                Err(_) => raw_fd = 0,
+            };
+
+            in_out_file = String::from(&caps[2]);
+
+            let fd_backup = nix::unistd::dup(raw_fd);
+            match fd_backup {
+                Ok(new_fd) => fd_reset_list.push((new_fd, raw_fd)),
+                Err(_) => {}
+            }
+
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .open(&in_out_file)
+                .unwrap();
+            let file_fd = file.into_raw_fd();
+            nix::unistd::dup2(file_fd, raw_fd).unwrap();
             redirect_in_state = INPUT;
         }
 
@@ -163,12 +238,40 @@ fn main() -> ! {
             cmd = re_textin.replace_all(&cmd, "").into_owned();
         }
 
+        for caps in re_fd_in.captures_iter(&cmd) {
+            let raw_fd1 = String::from(&caps[1]).parse::<i32>().unwrap();
+            let raw_fd2 = String::from(&caps[2]).parse::<i32>().unwrap();
+
+            let fd_backup = nix::unistd::dup(raw_fd1);
+            match fd_backup {
+                Ok(new_fd) => fd_reset_list.push((new_fd, raw_fd1)),
+                Err(_) => {}
+            }
+
+            nix::unistd::dup2(raw_fd2, raw_fd1).unwrap();
+        }
+
+        cmd = re_fd_in.replace_all(&cmd, "").into_owned();
+
+        for caps in re_fd_out.captures_iter(&cmd) {
+            let raw_fd1 = String::from(&caps[1]).parse::<i32>().unwrap();
+            let raw_fd2 = String::from(&caps[2]).parse::<i32>().unwrap();
+
+            let fd_backup = nix::unistd::dup(raw_fd1);
+            match fd_backup {
+                Ok(new_fd) => fd_reset_list.push((new_fd, raw_fd1)),
+                Err(_) => {}
+            }
+
+            nix::unistd::dup2(raw_fd2, raw_fd1).unwrap();
+        }
+
+        cmd = re_fd_out.replace_all(&cmd, "").into_owned();
+
         let pipes = cmd.split("|");
         let mut prog_out = String::new();
 
-        if redirect_in_state == INPUT {
-            prog_out = fs::read_to_string(&in_out_file).unwrap();
-        } else if redirect_in_state == HERE {
+        if redirect_in_state == HERE {
             print!("> ");
             io::stdout().flush().unwrap();
             for line_res in stdin().lock().lines() {
@@ -239,22 +342,34 @@ fn main() -> ! {
                         prog_out = format!("{}\n", value);
                     }
                     _ => {
-                        let process = match Command::new(prog)
-                            .args(args)
-                            .stdin(Stdio::piped())
-                            .stdout(Stdio::piped())
-                            .spawn()
-                        {
-                            Err(why) => panic!("couldn't spawn process: {}", why),
-                            Ok(process) => process,
-                        };
+                        let process;
+                        if redirect_in_state == HERE || redirect_in_state == TEXTIN {
+                            process = match Command::new(prog)
+                                .args(args)
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::piped())
+                                .spawn()
+                            {
+                                Err(why) => panic!("couldn't spawn process: {}", why),
+                                Ok(process) => process,
+                            };
 
-                        match process.stdin.unwrap().write_all(prog_out.as_bytes()) {
-                            Err(why) => panic!("couldn't write to process: {}", why),
-                            Ok(_) => {}
+                            match process.stdin.unwrap().write_all(prog_out.as_bytes()) {
+                                Err(why) => panic!("couldn't write to process: {}", why),
+                                Ok(_) => {}
+                            }
+
+                            prog_out.clear();
+                        } else {
+                            process = match Command::new(prog)
+                                .args(args)
+                                .stdout(Stdio::piped())
+                                .spawn()
+                            {
+                                Err(why) => panic!("couldn't spawn process: {}", why),
+                                Ok(process) => process,
+                            };
                         }
-
-                        prog_out.clear();
 
                         match process.stdout.unwrap().read_to_string(&mut prog_out) {
                             Err(why) => panic!("couldn't read stdout: {}", why),
@@ -266,18 +381,10 @@ fn main() -> ! {
         }
 
         if !prog_out.is_empty() {
-            if redirect_out_state == APPEND {
-                let mut file = fs::OpenOptions::new()
-                    .append(true)
-                    .open(&in_out_file)
-                    .unwrap();
-                file.write(prog_out.as_bytes()).unwrap();
-            } else if redirect_out_state == CREATE {
-                fs::write(&in_out_file, prog_out).unwrap();
-            } else {
-                print!("{}", prog_out);
-                io::stdout().flush().unwrap();
-            }
+            print!("{}", prog_out);
+            io::stdout().flush().unwrap();
         }
+
+        reset_fd(&fd_reset_list);
     }
 }
