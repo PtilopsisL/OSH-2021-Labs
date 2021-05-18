@@ -47,6 +47,7 @@ fn reset_fd(reset: &Vec<(i32, i32)>) {
     for elem in reset {
         let (old_fd, new_fd) = elem;
         nix::unistd::dup2(*old_fd, *new_fd).unwrap();
+        nix::unistd::close(*old_fd).unwrap();
     }
 }
 
@@ -70,11 +71,11 @@ fn main() -> ! {
 
     let re_find_curr_dir = Regex::new(r".+/").unwrap();
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
-    let re_create = Regex::new(r"[^>]{1}([0-9]*)>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_append = Regex::new(r"[^>]{1}([0-9]*)>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_input = Regex::new(r"[^<]{1}([0-9]*)<[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_here = Regex::new(r"[^<]{1}<<[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_textin = Regex::new(r"[^<]{1}<<<[\s]*([\S]+)").unwrap();
+    let re_create = Regex::new(r"(?P<x>[^>]{1})([0-9]*)>[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_append = Regex::new(r"(?P<x>[^>]{1})([0-9]*)>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_input = Regex::new(r"(?P<x>[^<]{1}){1}([0-9]*)<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_here = Regex::new(r"(?P<x>[^<]{1})<<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_textin = Regex::new(r"(?P<x>[^<]{1})<<<[\s]*([\S]+)").unwrap();
     let re_fd_in = Regex::new(r"[\s]+([0-9]+)<&[\s]*([0-9]+)").unwrap();
     let re_fd_out = Regex::new(r"[\s]+([0-9]+)>&[\s]*([0-9]+)").unwrap();
 
@@ -132,14 +133,14 @@ fn main() -> ! {
 
         // regex match
         for caps in re_create.captures_iter(&cmd) {
-            let raw_fd_result = String::from(&caps[1]).parse::<i32>();
+            let raw_fd_result = String::from(&caps[2]).parse::<i32>();
             let raw_fd: i32;
             match raw_fd_result {
                 Ok(num) => raw_fd = num,
                 Err(_) => raw_fd = 1,
             };
 
-            in_out_file = String::from(&caps[2]);
+            in_out_file = String::from(&caps[3]);
 
             let fd_backup = nix::unistd::dup(raw_fd);
             match fd_backup {
@@ -154,22 +155,23 @@ fn main() -> ! {
                 .unwrap();
             let file_fd = file.into_raw_fd();
             nix::unistd::dup2(file_fd, raw_fd).unwrap();
+            nix::unistd::close(file_fd).unwrap();
             redirect_out_state = CREATE;
         }
 
         if redirect_out_state == CREATE {
-            cmd = re_create.replace_all(&cmd, "").into_owned();
+            cmd = re_create.replace_all(&cmd, "$x").into_owned();
         }
 
         for caps in re_append.captures_iter(&cmd) {
-            let raw_fd_result = String::from(&caps[1]).parse::<i32>();
+            let raw_fd_result = String::from(&caps[2]).parse::<i32>();
             let raw_fd: i32;
             match raw_fd_result {
                 Ok(num) => raw_fd = num,
                 Err(_) => raw_fd = 1,
             };
 
-            in_out_file = String::from(&caps[2]);
+            in_out_file = String::from(&caps[3]);
 
             let fd_backup = nix::unistd::dup(raw_fd);
             match fd_backup {
@@ -184,22 +186,23 @@ fn main() -> ! {
                 .unwrap();
             let file_fd = file.into_raw_fd();
             nix::unistd::dup2(file_fd, raw_fd).unwrap();
+            nix::unistd::close(file_fd).unwrap();
             redirect_out_state = APPEND;
         }
 
         if redirect_out_state == APPEND {
-            cmd = re_append.replace_all(&cmd, "").into_owned();
+            cmd = re_append.replace_all(&cmd, "$x").into_owned();
         }
 
         for caps in re_input.captures_iter(&cmd) {
-            let raw_fd_result = String::from(&caps[1]).parse::<i32>();
+            let raw_fd_result = String::from(&caps[2]).parse::<i32>();
             let raw_fd: i32;
             match raw_fd_result {
                 Ok(num) => raw_fd = num,
                 Err(_) => raw_fd = 0,
             };
 
-            in_out_file = String::from(&caps[2]);
+            in_out_file = String::from(&caps[3]);
 
             let fd_backup = nix::unistd::dup(raw_fd);
             match fd_backup {
@@ -213,29 +216,30 @@ fn main() -> ! {
                 .unwrap();
             let file_fd = file.into_raw_fd();
             nix::unistd::dup2(file_fd, raw_fd).unwrap();
+            nix::unistd::close(file_fd).unwrap();
             redirect_in_state = INPUT;
         }
 
         if redirect_in_state == INPUT {
-            cmd = re_input.replace_all(&cmd, "").into_owned();
+            cmd = re_input.replace_all(&cmd, "$x").into_owned();
         }
 
         for caps in re_here.captures_iter(&cmd) {
-            in_out_file = String::from(&caps[1]);
+            in_out_file = String::from(&caps[2]);
             redirect_in_state = HERE;
         }
 
         if redirect_in_state == HERE {
-            cmd = re_here.replace_all(&cmd, "").into_owned();
+            cmd = re_here.replace_all(&cmd, "$x").into_owned();
         }
 
         for caps in re_textin.captures_iter(&cmd) {
-            in_out_file = String::from(&caps[1]);
+            in_out_file = String::from(&caps[2]);
             redirect_in_state = TEXTIN;
         }
 
         if redirect_in_state == TEXTIN {
-            cmd = re_textin.replace_all(&cmd, "").into_owned();
+            cmd = re_textin.replace_all(&cmd, "$x").into_owned();
         }
 
         for caps in re_fd_in.captures_iter(&cmd) {
