@@ -5,6 +5,7 @@ use std::fs;
 use std::io::prelude::*;
 use std::io::{self, Write};
 use std::io::{stdin, BufRead};
+use std::net::TcpStream;
 use std::os::unix::io::IntoRawFd;
 use std::process::{exit, Command, Stdio};
 use std::vec::Vec;
@@ -71,13 +72,15 @@ fn main() -> ! {
 
     let re_find_curr_dir = Regex::new(r".+/").unwrap();
     let re_replace_to_home = Regex::new(r"(?P<y>\s{0,1})~").unwrap();
-    let re_create = Regex::new(r"(?P<x>[^>]{1})([0-9]*)>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_append = Regex::new(r"(?P<x>[^>]{1})([0-9]*)>>[\s]*([0-9a-zA-Z\._]+)").unwrap();
-    let re_input = Regex::new(r"(?P<x>[^<]{1}){1}([0-9]*)<[\s]*([0-9a-zA-Z\._]+)").unwrap();
+    let re_create = Regex::new(r"(?P<x>[^>]{1})([0-9]*)>[\s]*([/0-9a-zA-Z\._]+)").unwrap();
+    let re_append = Regex::new(r"(?P<x>[^>]{1})([0-9]*)>>[\s]*([/0-9a-zA-Z\._]+)").unwrap();
+    let re_input = Regex::new(r"(?P<x>[^<]{1}){1}([0-9]*)<[\s]*([/0-9a-zA-Z\._]+)").unwrap();
     let re_here = Regex::new(r"(?P<x>[^<]{1})<<[\s]*([0-9a-zA-Z\._]+)").unwrap();
     let re_textin = Regex::new(r"(?P<x>[^<]{1})<<<[\s]*([\S]+)").unwrap();
     let re_fd_in = Regex::new(r"[\s]+([0-9]+)<&[\s]*([0-9]+)").unwrap();
     let re_fd_out = Regex::new(r"[\s]+([0-9]+)>&[\s]*([0-9]+)").unwrap();
+
+    let re_tcp = Regex::new(r"/dev/tcp/([\d]+\.[\d]+\.[\d]+\.[\d]+)/([\d]+)").unwrap();
 
     let user_name;
     match env::var("USER") {
@@ -132,6 +135,8 @@ fn main() -> ! {
         let mut redirect_in_state = NOCHANGE;
 
         // regex match
+
+        // CREATE
         for caps in re_create.captures_iter(&cmd) {
             let raw_fd_result = String::from(&caps[2]).parse::<i32>();
             let raw_fd: i32;
@@ -148,12 +153,28 @@ fn main() -> ! {
                 Err(_) => {}
             }
 
-            let file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&in_out_file)
-                .unwrap();
-            let file_fd = file.into_raw_fd();
+            let mut file_fd = raw_fd;
+            let mut tcp_flag = false;
+            for tcp_cap in re_tcp.captures_iter(&in_out_file) {
+                tcp_flag = true;
+
+                let ip_addr = String::from(&tcp_cap[1]);
+                let port = String::from(&tcp_cap[2]);
+
+                let tcp_stream = TcpStream::connect(ip_addr + ":" + &port)
+                    .expect("Couldn't connect to the server...");
+                file_fd = tcp_stream.into_raw_fd();
+            }
+
+            if tcp_flag == false {
+                let file = fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&in_out_file)
+                    .unwrap();
+                file_fd = file.into_raw_fd();
+            }
+
             nix::unistd::dup2(file_fd, raw_fd).unwrap();
             nix::unistd::close(file_fd).unwrap();
             redirect_out_state = CREATE;
@@ -162,6 +183,7 @@ fn main() -> ! {
         if redirect_out_state == CREATE {
             cmd = re_create.replace_all(&cmd, "$x").into_owned();
         }
+        // End of CREATE
 
         for caps in re_append.captures_iter(&cmd) {
             let raw_fd_result = String::from(&caps[2]).parse::<i32>();
