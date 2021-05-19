@@ -342,6 +342,8 @@ fn main() -> ! {
             prog_out = in_out_file.clone() + "\n";
         }
 
+        let mut prog_flag = false;
+
         for progs in pipes {
             let mut args = progs.split_whitespace();
             let prog = args.next();
@@ -397,7 +399,7 @@ fn main() -> ! {
                     }
                     _ => {
                         let process;
-                        if redirect_in_state == HERE || redirect_in_state == TEXTIN {
+                        if redirect_in_state == HERE || redirect_in_state == TEXTIN || prog_flag == true {
                             process = match Command::new(prog)
                                 .args(args)
                                 .stdin(Stdio::piped())
@@ -423,6 +425,8 @@ fn main() -> ! {
                                 Err(why) => panic!("couldn't spawn process: {}", why),
                                 Ok(process) => process,
                             };
+
+                            prog_flag = true;
                         }
 
                         match process.stdout.unwrap().read_to_string(&mut prog_out) {
