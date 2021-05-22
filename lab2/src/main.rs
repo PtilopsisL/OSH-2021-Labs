@@ -260,10 +260,6 @@ fn main() -> ! {
                 file_fd = file.into_raw_fd();
             }
 
-            if file_fd == raw_fd {
-                panic!("Redirect failed!\n");
-            }
-
             nix::unistd::dup2(file_fd, raw_fd).unwrap();
             nix::unistd::close(file_fd).unwrap();
             redirect_in_state = INPUT;
