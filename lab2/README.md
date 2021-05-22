@@ -18,9 +18,15 @@ cargo run
 
 ### 支持管道
 
+支持含多个管道的命令。
+
 ### 支持基本的文件重定向
 
+支持`>`、`>>`和`<`。
+
 ### 处理Ctrl-C的按键
+
+支持处理Ctrl-C按键。
 
 ### 处理Ctrl-D的按键
 
@@ -40,8 +46,42 @@ ubuntu@VM2531-lhy:/home/ubuntu/OSH-2021-Labs/lab2$ cargo run
 [ubuntu@VM2531-lhy] lab2 $ ubuntu@VM2531-lhy:/home/ubuntu/OSH-2021-Labs/lab2$ 
 ```
 按下`Ctrl-D`后，`zsh`末尾有一个奇怪的`%`符号，并且带换行；而`bash`不带换行。考虑到很难支持不同`shell`的行为，本`shell`在处理`Ctrl-D`的时候不主动换行。
+### 支持Bash风格的TCP重定向
+支持如`ls > /dev/tcp/127.0.0.1/6666`，`cat < /dev/tcp/127.0.0.1/6666`等操作。
+
+### 支持基于文件描述符的文件重定向、文件重定向组合
+支持`cmd 10> out.txt`，`cmd 20< in.txt`，`cmd 10>&20 30< in.txt`操作。
+支持`<<`输入模式（Here Document）。
+支持`<<<`输入模式。
+
 ### 更多功能
-- 支持`echo $SHELL`类操作（即`echo $(some env)`）。
+- 支持`echo $SHELL`、`echo $HOME`等操作（即`echo $(some env)`）。
+
+### 测试shell的样例
+包含管道、基本重定向、Ctrl-C、Ctrl-D、TCP重定向、基于文件描述符的文件重定向、文件重定向组合、更多功能测试。
+```bash
+$ ps aux | cat -n | grep 200
+$ ps aux | cat -n | grep 200 > out.txt
+$ ls >> out.txt
+$ cat < out.txt
+$ cat -n << ABC
+> abcd
+> efgh
+> ijkl
+> ABC
+$ cat -n <<< abcdef
+$ ls 1> out.txt
+$ cat 0< out.txt
+$ cat 2>&1 0< out.txt
+$ ls > /dev/tcp/127.0.0.1/6666
+$ cat < /dev/tcp/127.0.0.1/6666
+$ echo $HOME
+$ echo $SHELL
+$ sleep^C
+$ sleep 10
+^C
+$ % # 按下Ctrl-D
+```
 
 ## strace追踪系统调用
 追踪编写的shell程序，结果如下：
