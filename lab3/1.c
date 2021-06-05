@@ -24,18 +24,20 @@ void *handle_chat(void *data) {
     int counter = 8;
     while ((len = recv(pipe->fd_send, buffer + buff_len, 1024, 0)) > 0) {
         buff_len += len;
-        while (buffer[counter] != '\n' && counter < buff_len){
-            counter++;
-        }
-
-        if (counter < buff_len){
-            if (send(pipe->fd_recv, buffer, counter + 1, 0) != counter + 1) {
-                perror("send");
-                exit(0);
+        while (counter < buff_len){
+            while (buffer[counter] != '\n' && counter < buff_len){
+                counter++;
             }
-            memcpy(buffer + 8, buffer + counter + 1, buff_len - counter - 1);
-            buff_len -= (counter - 7);
-            counter = 8;
+
+            if (counter < buff_len){
+                if (send(pipe->fd_recv, buffer, counter + 1, 0) != counter + 1) {
+                    perror("send");
+                    exit(0);
+                }
+                memcpy(buffer + 8, buffer + counter + 1, buff_len - counter - 1);
+                buff_len -= (counter - 7);
+                counter = 8;
+            }
         }
     }
     free(buffer);

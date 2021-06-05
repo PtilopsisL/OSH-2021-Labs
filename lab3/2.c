@@ -40,31 +40,33 @@ void *handle_chat(void *p) {
     int counter = 8;
     while ((len = recv(curr_fd, buffer + buff_len, 1024, 0)) > 0) {
         buff_len += len;
-        while (buffer[counter] != '\n' && counter < buff_len){
-            counter++;
-        }
+        while (counter < buff_len){
+            while (buffer[counter] != '\n' && counter < buff_len){
+                counter++;
+            }
 
-        pthread_mutex_lock(&mutex);
-        while (!ready) {
-            pthread_cond_wait(&cv, &mutex);
-        }
+            pthread_mutex_lock(&mutex);
+            while (!ready) {
+                pthread_cond_wait(&cv, &mutex);
+            }
         
-        if (counter < buff_len){
-            for (int i = 0; i < MAX_USERS; i++) {
-                if (fd_stat[i] == 1 && fds[i] != curr_fd) {
-                    if (send(fds[i], buffer, counter + 1, 0) != counter + 1) {
-                        perror("send");
-                        exit(0);
+            if (counter < buff_len){
+                for (int i = 0; i < MAX_USERS; i++) {
+                    if (fd_stat[i] == 1 && fds[i] != curr_fd) {
+                        if (send(fds[i], buffer, counter + 1, 0) != counter + 1) {
+                            perror("send");
+                            exit(0);
+                        }
                     }
                 }
-            }
             
-            memcpy(buffer + 8, buffer + counter + 1, buff_len - counter - 1);
-            buff_len -= (counter - 7);
-            counter = 8;
-        }
+                memcpy(buffer + 8, buffer + counter + 1, buff_len - counter - 1);
+                buff_len -= (counter - 7);
+                counter = 8;
+            }
 
-        pthread_mutex_unlock(&mutex);
+            pthread_mutex_unlock(&mutex);
+        }
     }
     free(buffer);
 
@@ -73,6 +75,7 @@ void *handle_chat(void *p) {
 
     fd_stat[num] = 0;
     used_len--;
+    printf("one user disconnected, current user: %d\n", used_len);
 
     ready = 1;
     pthread_cond_signal(&cv);
@@ -106,7 +109,7 @@ void *handle_accept(void *p){
         *ptr = empty_fd;
         pthread_create(&threads[empty_fd], NULL, handle_chat, (void *)ptr);
         used_len++;
-
+        printf("new user connected, current user: %d\n", used_len);
 end:
         ready = 1;
         pthread_cond_signal(&cv);
@@ -133,6 +136,7 @@ int main(int argc, char **argv) {
         perror("listen");
         return 1;
     }
+    printf("server start, max user: %d, current user: %d\n", MAX_USERS, used_len);
     handle_accept(NULL);
     return 0;
 }
