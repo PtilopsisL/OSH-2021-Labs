@@ -169,6 +169,7 @@ fn main() -> ! {
             if tcp_flag == false {
                 let file = fs::OpenOptions::new()
                     .write(true)
+                    .create(true)
                     .truncate(true)
                     .open(&in_out_file)
                     .unwrap();
