@@ -22,7 +22,7 @@ void *handle_chat(void *data) {
     ssize_t buff_len = 8;
     ssize_t len;
     int counter = 8;
-    while ((len = recv(pipe->fd_send, buffer + buff_len, 4, 0)) > 0) {
+    while ((len = recv(pipe->fd_send, buffer + buff_len, 1024, 0)) > 0) {
         buff_len += len;
         while (buffer[counter] != '\n' && counter < buff_len){
             counter++;
