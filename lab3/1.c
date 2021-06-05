@@ -6,6 +6,10 @@
 #include <netinet/in.h>
 #include <pthread.h>
 
+#define MAX_BUFFER_SIZE 1200000
+
+const char msg[] = "Message:";
+
 struct Pipe {
     int fd_send;
     int fd_recv;
@@ -13,11 +17,28 @@ struct Pipe {
 
 void *handle_chat(void *data) {
     struct Pipe *pipe = (struct Pipe *)data;
-    char buffer[1024] = "Message:";
+    char* buffer = (char *)malloc(MAX_BUFFER_SIZE);
+    memcpy(buffer, msg, 8);
+    ssize_t buff_len = 8;
     ssize_t len;
-    while ((len = recv(pipe->fd_send, buffer + 8, 1000, 0)) > 0) {
-        send(pipe->fd_recv, buffer, len + 8, 0);
+    int counter = 8;
+    while ((len = recv(pipe->fd_send, buffer + buff_len, 4, 0)) > 0) {
+        buff_len += len;
+        while (buffer[counter] != '\n' && counter < buff_len){
+            counter++;
+        }
+
+        if (counter < buff_len){
+            if (send(pipe->fd_recv, buffer, counter + 1, 0) != counter + 1) {
+                perror("send");
+                exit(0);
+            }
+            memcpy(buffer + 8, buffer + counter + 1, buff_len - counter - 1);
+            buff_len -= (counter - 7);
+            counter = 8;
+        }
     }
+    free(buffer);
     return NULL;
 }
 
