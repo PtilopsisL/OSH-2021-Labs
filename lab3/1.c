@@ -30,10 +30,16 @@ void *handle_chat(void *data) {
             }
 
             if (counter < buff_len){
-                if (send(pipe->fd_recv, buffer, counter + 1, 0) != counter + 1) {
-                    perror("send");
-                    exit(0);
+                int send_head = 0;
+                while (send_head != counter + 1) {
+                    int send_len = send(pipe->fd_recv, buffer + send_head, counter + 1 - send_head, 0);
+                    if (send_len < 0) {
+                        perror("send");
+                        exit(0);
+                    }
+                    send_head += send_len;
                 }
+                
                 memcpy(buffer + 8, buffer + counter + 1, buff_len - counter - 1);
                 buff_len -= (counter - 7);
                 counter = 8;

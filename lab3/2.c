@@ -53,9 +53,14 @@ void *handle_chat(void *p) {
             if (counter < buff_len){
                 for (int i = 0; i < MAX_USERS; i++) {
                     if (fd_stat[i] == 1 && fds[i] != curr_fd) {
-                        if (send(fds[i], buffer, counter + 1, 0) != counter + 1) {
-                            perror("send");
-                            exit(0);
+                        int send_head = 0;
+                        while (send_head != counter + 1) {
+                            int send_len = send(fds[i], buffer + send_head, counter + 1 - send_head, 0);
+                            if (send_len < 0) {
+                                perror("send");
+                                exit(0);
+                            }
+                            send_head += send_len;
                         }
                     }
                 }

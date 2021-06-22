@@ -95,9 +95,14 @@ end:
                             if (counter[i] < buff_len[i]){
                                 for (int j = 0; j < MAX_USERS; j++){
                                     if (fd_stat[j] == 1 && fds[j] != fds[i]) {
-                                        if (send(fds[j], buffers[i], counter[i] + 1, 0) != counter[i] + 1) {
-                                            perror("send");
-                                            exit(0);
+                                        int send_head = 0;
+                                        while (send_head != counter[i] + 1) {
+                                            int send_len = send(fds[j], buffers[i] + send_head, counter[i] + 1 - send_head, 0);
+                                            if (send_len < 0) {
+                                                perror("send");
+                                                exit(0);
+                                            }
+                                            send_head += send_len;
                                         }
                                     }
                                 }
